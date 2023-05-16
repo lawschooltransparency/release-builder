@@ -5,6 +5,7 @@ import regex
 import requests
 import sys
 
+ASSETS_TOKEN = os.environ.get("ASSETS_TOKEN", "")
 GITHUB_ACTOR = os.environ.get("GITHUB_ACTOR", "")
 GITHUB_ACTOR_URL = f"https://github.com/{GITHUB_ACTOR}"
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
@@ -23,10 +24,15 @@ PROJECT_TYPE = os.environ.get("PROJECT_TYPE", "website")
 TARGET_NAME = os.environ.get("TARGET_NAME", "")
 TARGET_URL = os.environ.get("TARGET_URL", "")
 
-github = requests.Session()
-github.headers = {
+github_api = requests.Session()
+github_api.headers = {
     "Accept": "application/json",
     "Authorization": f"Bearer {GITHUB_TOKEN}",
+}
+
+github_assets = requests.Session()
+github_assets.headers = {
+    "Authorization": f"Token {ASSETS_TOKEN}",
 }
 
 image_html_re = regex.compile(r'<img.*?alt="(.*?)".*?src="(.*?)".*?>')
@@ -43,7 +49,7 @@ release_re = regex.compile(
 
 
 def build_message():
-    user = github.get(f"https://api.github.com/users/{GITHUB_ACTOR}").json()
+    user = github_api.get(f"https://api.github.com/users/{GITHUB_ACTOR}").json()
 
     actor = user.get("name", GITHUB_ACTOR)
     actor_link = f"[{actor}]({GITHUB_ACTOR_URL})"
@@ -105,7 +111,7 @@ def find_images(text):
 def get_images(release):
     images = []
 
-    response = github.get(
+    response = github_api.get(
         f"https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls",
         params=dict(
             per_page=100,
@@ -121,13 +127,16 @@ def get_images(release):
         if not pull:
             continue
 
-        images.extend(
-            [
+        for text, url in find_images(pull["body"] or ""):
+            if "badge" in url:
+                continue
+
+            if url.startswith("https://github.com") and "/assets/" in url:
+                url = github_assets.get(url, allow_redirects=False).headers["location"]
+
+            images.append(
                 (f"{pull['title']} #{pull['number']}: {text}".strip(": "), url)
-                for text, url in find_images(pull["body"] or "")
-                if "badge" not in url
-            ]
-        )
+            )
 
     return images
 
